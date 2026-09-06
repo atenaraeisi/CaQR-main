@@ -1,0 +1,33 @@
+The code is for the paper: ```CaQR: A Compiler-Assisted Approach for Qubit Reuse through Dynamic Circuit```. It is for resizing logical circuits. 
+
+# Running the Benchmark
+
+To run the file, please follow these steps:
+
+## Installation
+
+First, if Qiskit isn't installed, install it with version 0.45 using pip. The current tested version works on Qiskit 0.45. This version has also been tested and is working on Qiskit version 0.25.2. The code depends on the python package ```networkx```. You will also need to install ```networkx``` if you do not have it. Python version is 3.8 on this tested version. 
+
+```bash
+pip install qiskit==0.45
+```
+Then, you can run the main.py file. There are a few command line options.
+1. -v 0 only outputs the result (qubit count and qasm file), and -v 1 outputs the circuit diagram additionally. 
+2. -b is for specifying the benchmark
+3. -w1 -w2 is for setting the weight of the cost function to strike a balance between qubit reuse and weight cost. They are optional. The default is w1 = 1 and w2 = 1. 
+
+Below is an example of running the bv_n10 benchmark in the ```benchmarks``` folder. You must put all test qasm files in the ```benchmarks``` folder. 
+
+```bash
+python main.py -b benchmarks/bv_n10.qasm -v 0
+```
+
+The modified circuit will be in the output folder with ```_reuse``` appended to its file name. For the above example, the resulting code will be saved at ```output/bv_n10_reuse.qasm```. Additional files ending with ```_reuse_chain.txt``` and ```_reuse_map.txt``` will also be created, for verification purpose. 
+
+To verify the output, run validate.py. Below is an example using bv_n10: 
+```bash 
+python validate.py bv_n10
+```
+
+Note that you must run the "main.py" to generate the output for one benchmark file before you run "validate.py" on the same benchmark. For running "validate.py", you do not have to specify the benchmark path, as the path is hardcoded. 
+
