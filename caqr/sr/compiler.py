@@ -7,6 +7,9 @@ from caqr.sr.mapping import choose_first_logical
 from caqr.sr.mapping import select_physical_for_first_logical
 from caqr.sr.mapping import select_physical_for_single_qubit_gate
 from caqr.sr.mapping import select_physical_near_partner
+from caqr.sr.metrics import metric_metadata
+from caqr.sr.metrics import routed_stage_metrics
+from caqr.sr.metrics import translated_stage_metrics
 from caqr.sr.routing import route_until_adjacent
 from caqr.sr.validation import assert_compiled_hardware_compliant
 from caqr.sr.validation import count_two_qubit_operations
@@ -168,19 +171,42 @@ class SRCompiler:
         original_two_qubit_count = sum(
             1 for node in self.dag.nodes if len(node.logical_qubits) == 2
         )
+        reused_previous_logicals = {
+            event["previous_logical"] for event in self.state.reuse_events
+        }
+        reclaimed_but_never_reused = [
+            event
+            for event in self.state.reclaim_events
+            if event["logical"] not in reused_previous_logicals
+        ]
+        sr_pre_basis = routed_stage_metrics(
+            self.state.output,
+            routed_two_qubit_operation_count=self.state.routed_two_qubit_operation_count,
+        )
+        sr_post_basis = translated_stage_metrics(self.state.output)
         report = {
             "mode": "sr",
             "logical_qubits": self.circuit.num_qubits,
+            "original_logical_width": self.circuit.num_qubits,
             "physical_qubits_available": self.device.num_qubits,
             "physical_qubits_used": len(self.state.used_physical_qubits),
+            "distinct_physical_qubits_used": sorted(self.state.used_physical_qubits),
+            "reclaim_count": len(self.state.reclaim_events),
             "reuse_count": len(self.state.reuse_events),
+            "reset_count": self.state.reset_count,
+            "reclaimed_but_never_reused_count": len(reclaimed_but_never_reused),
+            "reclaimed_but_never_reused": reclaimed_but_never_reused,
             "inserted_swap_count": self.state.inserted_swap_count,
             "swap_count": self.state.inserted_swap_count,
             "depth": self.state.output.depth(),
             "two_qubit_gate_count": final_two_qubit_count,
             "original_two_qubit_gate_count": original_two_qubit_count,
             "routed_two_qubit_operation_count": self.state.routed_two_qubit_operation_count,
-            "basis_two_qubit_gate_count": None,
+            "basis_two_qubit_gate_count": sr_post_basis["basis_two_qubit_gate_count"],
+            "translated_depth": sr_post_basis["translated_depth"],
+            "metric_definitions": metric_metadata(self.device),
+            "pre_basis": sr_pre_basis,
+            "post_basis": sr_post_basis,
             "mapping_history": self.state.mapping_history,
             "reuse_events": self.state.reuse_events,
             "reclaim_events": self.state.reclaim_events,

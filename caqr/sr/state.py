@@ -19,6 +19,7 @@ class SRState:
     emitted_measurements: set = field(default_factory=set)
     scheduled_original_node_ids: list = field(default_factory=list)
     inserted_swap_count: int = 0
+    reset_count: int = 0
     routed_two_qubit_operation_count: int = 0
     used_physical_qubits: set = field(default_factory=set)
     mapping_history: list = field(default_factory=list)
@@ -167,6 +168,7 @@ class SRState:
             # after the physical qubit is safe as a fresh resource.
             self._emit_measurement_if_required(logical, physical, measurement_by_logical)
             self.output.reset(physical)
+            self.reset_count += 1
             del self.logical_to_physical[logical]
             self.physical_to_logical[physical] = None
             self.physical_fresh[physical] = True

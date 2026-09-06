@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from qiskit import ClassicalRegister
 from qiskit import QuantumCircuit
@@ -13,6 +14,7 @@ from qiskit import QuantumRegister
 from caqr.device import DeviceInfo
 from caqr.modes.sr import run_sr_caqr
 from caqr.sr.baseline import qiskit_sabre_baseline
+from caqr.sr.compiler import DeadlockError
 from caqr.sr.compiler import compile_regular_circuit
 from caqr.sr.dag import UnsupportedCircuitError
 from caqr.sr.dag import preprocess_regular_circuit
@@ -33,6 +35,14 @@ def line_device(num_qubits):
         name=f"line_{num_qubits}",
         num_qubits=num_qubits,
         coupling_edges=edges,
+    )
+
+
+def disconnected_device():
+    return DeviceInfo(
+        name="disconnected_3",
+        num_qubits=3,
+        coupling_edges=[(0, 1), (1, 0)],
     )
 
 
@@ -134,6 +144,80 @@ class SRRegularTest(unittest.TestCase):
         self.assertEqual(state.logical_to_physical[1], 0)
         self.assertEqual(state.reuse_events, [])
 
+    def test_reclaimed_free_location_can_be_used_by_swap(self):
+        circuit = measured_circuit(3)
+        circuit.cx(0, 1)
+        circuit.cx(0, 2)
+        circuit.cx(1, 2)
+        circuit.measure([0, 1, 2], [0, 1, 2])
+
+        result = compile_regular_circuit(circuit, line_device(3))
+
+        self.assertEqual(result.report["reuse_count"], 0)
+        self.assertEqual(result.report["reclaim_count"], 1)
+        self.assertEqual(result.report["reset_count"], 1)
+        self.assertEqual(result.report["reclaimed_but_never_reused_count"], 1)
+        self.assertEqual(result.report["inserted_swap_count"], 1)
+        self.assertIsNone(result.report["swap_events"][0]["owner_right_before"])
+
+    def test_multiple_consecutive_ownership_changes_one_physical(self):
+        circuit = measured_circuit(4)
+        circuit.cx(0, 1)
+        circuit.cx(2, 1)
+        circuit.cx(3, 1)
+        circuit.measure([0, 1, 2, 3], [0, 1, 2, 3])
+
+        result = compile_regular_circuit(circuit, line_device(2))
+
+        self.assertEqual(result.report["reuse_count"], 2)
+        self.assertEqual(
+            [
+                (
+                    event["physical"],
+                    event["previous_logical"],
+                    event["new_logical"],
+                )
+                for event in result.report["reuse_events"]
+            ],
+            [(1, 0, 2), (1, 2, 3)],
+        )
+
+    def test_logical_moved_by_swap_and_later_reclaimed(self):
+        circuit = measured_circuit(4)
+        circuit.cx(0, 1)
+        circuit.cx(0, 1)
+        circuit.cx(1, 2)
+        circuit.cx(0, 3)
+        circuit.measure([0, 1, 2, 3], [0, 1, 2, 3])
+
+        result = compile_regular_circuit(circuit, line_device(3)).report
+        swapped_logicals = set()
+        for event in result["swap_events"]:
+            for key in ["owner_left_before", "owner_right_before"]:
+                if event[key] is not None:
+                    swapped_logicals.add(event[key])
+        reclaimed_logicals = {event["logical"] for event in result["reclaim_events"]}
+
+        self.assertIn(1, swapped_logicals & reclaimed_logicals)
+
+    def test_both_operands_moved_by_earlier_swaps_before_final_operation(self):
+        circuit = measured_circuit(3)
+        circuit.cx(0, 1)
+        circuit.cx(1, 2)
+        circuit.cx(0, 2)
+        circuit.cx(0, 1)
+        circuit.measure([0, 1, 2], [0, 1, 2])
+
+        result = compile_regular_circuit(circuit, line_device(3)).report
+        self.assertEqual(result["inserted_swap_count"], 2)
+        swapped_logicals = set()
+        for event in result["swap_events"]:
+            for key in ["owner_left_before", "owner_right_before"]:
+                if event[key] is not None:
+                    swapped_logicals.add(event[key])
+
+        self.assertTrue({0, 1}.issubset(swapped_logicals))
+
     def test_reclamation_reuse_and_measurement_preservation(self):
         circuit = measured_circuit(3)
         circuit.cx(0, 1)
@@ -154,6 +238,19 @@ class SRRegularTest(unittest.TestCase):
             [instruction.name for instruction, _, _ in result.circuit.data].count("reset"),
             1,
         )
+
+    def test_reclaimed_but_never_reused_reset_is_reported(self):
+        circuit = measured_circuit(2)
+        circuit.cx(0, 1)
+        circuit.h(1)
+        circuit.measure([0, 1], [0, 1])
+
+        result = compile_regular_circuit(circuit, line_device(2)).report
+
+        self.assertEqual(result["reclaim_count"], 1)
+        self.assertEqual(result["reuse_count"], 0)
+        self.assertEqual(result["reset_count"], 1)
+        self.assertEqual(result["reclaimed_but_never_reused_count"], 1)
 
     def test_single_qubit_unmapped_frontier_uses_isolated_policy(self):
         circuit = measured_circuit(2)
@@ -190,6 +287,48 @@ class SRRegularTest(unittest.TestCase):
         with self.assertRaisesRegex(UnsupportedCircuitError, "multiple measurements"):
             compile_regular_circuit(circuit, line_device(1))
 
+    def test_disconnected_device_failure_is_explicit(self):
+        circuit = measured_circuit(3)
+        circuit.cx(0, 1)
+        circuit.cx(0, 2)
+        circuit.measure([0, 1, 2], [0, 1, 2])
+
+        with self.assertRaisesRegex(ValueError, "No coupling path"):
+            compile_regular_circuit(circuit, disconnected_device())
+
+    def test_insufficient_physical_resources_is_explicit(self):
+        circuit = measured_circuit(3)
+        circuit.h(0)
+        circuit.cx(1, 2)
+        circuit.h(0)
+        circuit.measure([0, 1, 2], [0, 1, 2])
+
+        with self.assertRaisesRegex(RuntimeError, "No fresh physical qubit"):
+            compile_regular_circuit(circuit, line_device(2))
+
+    def test_frontier_no_schedulable_progress_raises_deadlock(self):
+        circuit = measured_circuit(2)
+        circuit.cx(0, 1)
+        circuit.measure([0, 1], [0, 1])
+
+        with patch("caqr.sr.compiler.critical_frontier_ids", return_value=set()):
+            with self.assertRaisesRegex(DeadlockError, "frontier processing made no progress"):
+                compile_regular_circuit(circuit, line_device(2))
+
+    def test_circuit_with_unused_logical_qubits_preserves_measurements(self):
+        circuit = measured_circuit(3)
+        circuit.x(0)
+        circuit.measure([0, 1, 2], [0, 1, 2])
+
+        result = compile_regular_circuit(circuit, line_device(3))
+
+        self.assertEqual(
+            sorted(event["classical_bit"] for event in result.report["measurement_events"]),
+            [0, 1, 2],
+        )
+        self.assertEqual(result.report["logical_qubits"], 3)
+        self.assertEqual(result.report["physical_qubits_available"], 3)
+
     def test_fig12_style_regular_fixture(self):
         circuit = measured_circuit(5)
         circuit.cx(1, 2)  # g1
@@ -206,6 +345,31 @@ class SRRegularTest(unittest.TestCase):
         self.assertGreaterEqual(baseline["swap_count"], 1)
         self.assertGreaterEqual(result.report["reuse_count"], 1)
         assert_compiled_hardware_compliant(result.circuit, device)
+
+    def test_metric_stages_do_not_conflate_swaps_with_basis_gates(self):
+        circuit = measured_circuit(5)
+        circuit.cx(1, 2)
+        circuit.cx(0, 4)
+        circuit.cx(3, 4)
+        circuit.cx(1, 4)
+        circuit.measure([0, 1, 2, 3, 4], [0, 1, 2, 3, 4])
+        device = line_device(5)
+
+        report = compile_regular_circuit(circuit, device).report
+        baseline = report["qiskit_sabre_baseline"]
+
+        self.assertIn("pre_basis", report)
+        self.assertIn("post_basis", report)
+        self.assertIn("pre_basis", baseline)
+        self.assertIn("post_basis", baseline)
+        self.assertEqual(baseline["pre_basis"]["swap_count"], 1)
+        self.assertGreater(
+            baseline["post_basis"]["basis_two_qubit_gate_count"],
+            baseline["pre_basis"]["two_qubit_operation_count"],
+        )
+        self.assertEqual(report["physical_qubits_available"], 5)
+        self.assertEqual(report["original_logical_width"], 5)
+        self.assertIn("physical_qubits_used", baseline)
 
     def test_end_to_end_sr_compilation_from_qasm_and_device_json(self):
         circuit = measured_circuit(3)

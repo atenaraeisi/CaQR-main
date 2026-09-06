@@ -31,3 +31,10 @@ use calibration, error-rate, or gate-duration scoring yet.
 - REPRODUCTION DESIGN CHOICE: A free physical qubit is always clean because it enters physicalList only after reset or from the initial fresh pool. A SWAP between an occupied endpoint and a free endpoint moves the free slot to the previous occupied location.
 - REPRODUCTION DESIGN CHOICE: The local Qiskit comparison is named qiskit_sabre_baseline. It uses optimization_level=3, routing_method="sabre", and a fixed seed, but is not claimed as an exact paper-baseline reproduction.
 - REPRODUCTION DESIGN CHOICE: The Fig. 12-style test fixture uses the visible dependency pattern from the paper text: g1=(q1,q2), g2=(q0,q4), g3=(q3,q4), g4=(q1,q4) on a line topology. The paper figure extraction does not fully specify all hidden drawing details, so this is treated as a documented behavioral fixture rather than a numerical reproduction.
+
+## METRIC DEFINITIONS
+
+- Pre-basis metrics are measured on routed circuits that may still contain logical SWAP instructions. They report SWAP count, circuit depth, and routed two-qubit operation count without treating one SWAP as one basis hardware two-qubit gate.
+- Post-basis metrics are measured after translating routed circuits to `u1`, `u2`, `u3`, `cx`, `measure`, and `reset` with optimization disabled. They report basis two-qubit gate count and translated depth.
+- The Qiskit comparison is `qiskit_sabre_baseline`, using the same device coupling map, Qiskit 0.45.3, `routing_method="sabre"`, `optimization_level=3`, and seed 0.
+- SR and Qiskit both report available physical qubits, distinct used physical qubits, original logical width, pre-basis metrics, and post-basis metrics.
