@@ -62,7 +62,7 @@ class BV10RegressionTest(unittest.TestCase):
     def test_explicit_qs_cli_preserves_bv10_behavior(self):
         self.run_in_temp_repo(["--mode", "qs", "-b", "benchmarks/bv_n10.qasm", "-v", "0"])
 
-    def test_sr_mode_is_not_implemented(self):
+    def test_sr_mode_requires_device(self):
         result = subprocess.run(
             [
                 sys.executable,
@@ -71,15 +71,13 @@ class BV10RegressionTest(unittest.TestCase):
                 "sr",
                 "-b",
                 "benchmarks/bv_n10.qasm",
-                "--device",
-                "fake_device",
             ],
             cwd=ROOT,
             capture_output=True,
             text=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("SR-CaQR is not implemented yet", result.stderr)
+        self.assertIn("--device is required when running --mode sr", result.stderr)
 
 
 if __name__ == "__main__":
