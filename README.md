@@ -1,5 +1,9 @@
 # CaQR-main
 
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![Qiskit](https://img.shields.io/badge/Qiskit-Supported-purple.svg)](https://qiskit.org/)
+[![Tests](https://img.shields.io/badge/Tests-29%20Passed-brightgreen.svg)]()
+
 A research-oriented implementation and extension of **CaQR: A Compiler-Assisted Approach for Qubit Reuse through Dynamic Circuit**.
 
 This repository is based on the original implementation available at [ruadapt/CaQR](https://github.com/ruadapt/CaQR). It extends that codebase with an independent **SR-CaQR** mode, a physical-qubit-count parameter, regression tests for the original QS-CaQR behavior, and correctness tests for the new SR-CaQR implementation.
