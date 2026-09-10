@@ -238,3 +238,42 @@ def modify_circuit(circuit, pair):
     # print(f'there is remain {visited} gates')
     new_circuit = remove_consecutive_duplicate_gates(new_circuit)
     return new_circuit
+
+def apply_qubit_reuse(circuit, w1=1.0, w2=1.0, target_qubits=None):
+    """
+    Applies the QS-CaQR strategy to reuse qubits until the circuit qubit count 
+    meets the target budget or no further valid reuse pairs are available.
+    """
+    current_circuit = circuit.copy()
+    current_qubit_count = len(current_circuit.qubits)
+
+    while True:
+        # Stop condition: Stop if the qubit count reaches or drops below the target budget
+        if target_qubits is not None and current_qubit_count <= target_qubits:
+            break
+
+        # Search for all valid qubit reuse candidate pairs in the current DAG
+        valid_pairs = find_valid_reuse_pairs(current_circuit)
+        
+        # Stop condition: Stop if no more valid reuse pairs can be found
+        if not valid_pairs:
+            break
+
+        # Evaluate candidate pairs and select the one with minimal duration overhead
+        best_pair = None
+        min_cost = float('inf')
+
+        for q_i, q_j in valid_pairs:
+            cost = evaluate_reuse_cost(current_circuit, q_i, q_j, w1, w2)
+            if cost < min_cost:
+                min_cost = cost
+                best_pair = (q_i, q_j)
+
+        if best_pair is None:
+            break
+
+        # Apply qubit reuse (merge q_j into q_i and insert mid-circuit measurement + reset)
+        current_circuit = merge_qubits(current_circuit, best_pair[0], best_pair[1])
+        current_qubit_count -= 1
+
+    return current_circuit

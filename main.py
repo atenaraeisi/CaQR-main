@@ -19,13 +19,14 @@ def main():
                         help="weight for the depth difference (default: 0)")
     parser.add_argument('--device', type=str, default=None,
                         help="Target device for SR-CaQR (not implemented yet)")
-    
+    parser.add_argument("-k", "--target_qubits", type=int, default=None, 
+                        help="Target physical qubit budget for QS-CaQR mode")
+
 
     args = parser.parse_args()
     if args.mode == 'qs':
-        run_qs_caqr(args.benchmark, args.verbose, args.weight1, args.weight2)
+        run_qs_caqr(args.benchmark, args.verbose, args.weight1, args.weight2, target_qubits=args.target_qubits)
     elif args.mode == 'sr':
         run_sr_caqr(args.benchmark, args.device, args.verbose)
-
 if __name__ == '__main__':
     main()
